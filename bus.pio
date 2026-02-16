@@ -1,0 +1,109 @@
+;
+; Copyright (c) 2026 Michael Bell
+;
+; SPDX-License-Identifier: BSD-3-Clause
+;
+
+; Handling of the RV4028 bus for the IO module
+; 
+; Current implementation is done by separate programs for read and write:
+;
+; Write monitor
+; - Watch for WR to be asserted
+; - Check if IOSEL is asserted (If not, req is not for this module)
+; - Wait for WR to be deasserted (indicating data is valid)
+; - Read address and data pins (auto push of 16 bit address + data)
+;
+; Read monitor
+; - Watch for RDREQ to be asserted
+; - Check if IOSEL is asserted (If not, req is not for this module)
+; - Read address pins (auto push of 8 bit address)
+; - Assert WAIT
+; - Change data pins to outputs
+; - Out to data pins (blocking)
+; - De-assert WAIT
+; - Wait for RDREQ to be deasserted
+; - Change data pins to inputs
+;
+; The CPU loops checking for write and read requests.  Writes are handled in preference to reads
+; to preserve ordering.  It is assumed that the FIFO on the Write monitor is sufficiently large
+; that writes aren't lost.
+
+.program rv4028_write
+top:
+    wait 0 gpio 24  ; Wait for WR to be asserted
+    jmp pin top     ; Ignore if IOSEL not asserted
+    wait 1 gpio 24  ; Wait for WR to be deasserted
+    in pins, 16     ; Read pins and auto push
+
+.program rv4028_read
+top:
+    wait 0 gpio 25  ; Wait for RDREQ to be asserted
+    jmp pin top     ; Ignore if IOSEL not asserted
+    in pins, 8      ; Read address pins and auto push
+    set pindirs, 1  ; Assert WAIT
+    mov pindirs, ~NULL ; Set data pins to outputs
+    out pins, 8     ; Write data (this blocks)
+    set pindirs, 0  ; Deassert WAIT
+    wait 1 gpio 25  ; Wait for RDREQ to be deasserted
+    mov pindirs, NULL ; Set data pins to inputs
+
+% c-sdk {
+void rv4028_program_init(PIO pio, uint write_sm, uint read_sm, uint write_offset, uint read_offset) {
+    const int A0 = 3;
+    const int D0 = 11;
+    const int WAIT = 22;
+    const int IOSEL = 23;
+    const int WR = 24;
+    const int RDREQ = 25;
+    const int ADDR_MASK = 0xFF << A0;
+    const int DATA_MASK = 0xFF << D0;
+    const int WAIT_MASK = 1 << WAIT;
+    const int IO_MASK = 0x7 << IOSEL;
+
+    // Pull up WAIT, set to 0 when output enabled (initially disabled)
+    gpio_set_pulls(WAIT, true, false);
+    pio_sm_set_pindirs_with_mask(pio, write_sm, 0, WAIT_MASK);
+    pio_sm_set_pins_with_mask(pio, write_sm, 0, WAIT_MASK);
+    pio_gpio_init(pio, WAIT);
+    
+    // Configure DATA pins
+    pio_sm_set_pindirs_with_mask(pio, write_sm, 0, DATA_MASK);
+    for (int i = 0; i < 8; ++i) {
+        pio_gpio_init(pio, D0 + i);
+    }
+
+    // Configure ADDR pins
+    pio_sm_set_pindirs_with_mask(pio, write_sm, 0, ADDR_MASK);
+    for (int i = 0; i < 8; ++i) {
+        pio_gpio_init(pio, A0 + i);
+    }
+
+    // Configure IO pins
+    pio_sm_set_pindirs_with_mask(pio, write_sm, 0, IO_MASK);
+    pio_gpio_init(pio, IOSEL);
+    pio_gpio_init(pio, WR);
+    pio_gpio_init(pio, RDREQ);
+
+    // Configure write program
+    pio_sm_config c = rv4028_write_program_get_default_config(write_offset);
+    sm_config_set_in_pins(&c, A0);
+    sm_config_set_in_shift(&c, false, true, 16);
+    sm_config_set_jmp_pin(&c, IOSEL);
+
+    pio_sm_init(pio, write_sm, write_offset, &c);
+    pio_sm_set_enabled(pio, write_sm, true);
+
+    // Configure read program
+    c = rv4028_read_program_get_default_config(read_offset);
+    sm_config_set_in_pins(&c, A0);
+    sm_config_set_in_shift(&c, false, true, 8);
+    sm_config_set_out_pins(&c, D0, 8);
+    sm_config_set_out_shift(&c, false, true, 8);
+    sm_config_set_jmp_pin(&c, IOSEL);
+    sm_config_set_set_pins(&c, WAIT, 1);
+
+    pio_sm_init(pio, read_sm, read_offset, &c);
+    pio_sm_set_enabled(pio, read_sm, true);
+}
+%}
