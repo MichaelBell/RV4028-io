@@ -2,6 +2,7 @@
 #include "pico/stdlib.h"
 #include <hardware/uart.h>
 #include <hardware/pwm.h>
+#include <hardware/clocks.h>
 
 #include "bus.pio.h"
 
@@ -41,6 +42,8 @@ static __force_inline void handle_read(uint32_t addr) {
 }
 
 int main() {
+    set_sys_clock_khz(200000, true);
+
     stdio_init_all();
 
     write_sm = pio_claim_unused_sm(BUSPIO, true);
@@ -58,7 +61,7 @@ int main() {
     uint slice_num = pwm_gpio_to_slice_num(CLK);
     pwm_set_wrap(slice_num, 1);
     pwm_set_chan_level(slice_num, PWM_CHAN_B, 1);
-    pwm_set_clkdiv(slice_num, 75);  // 1 MHz clock
+    pwm_set_clkdiv(slice_num, 10);  // 10 MHz clock
     pwm_set_enabled(slice_num, true);
 
     gpio_put(RST, 0);

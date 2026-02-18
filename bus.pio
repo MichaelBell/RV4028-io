@@ -44,7 +44,9 @@ top:
     set pindirs, 1  ; Assert WAIT
     mov pindirs, ~NULL ; Set data pins to outputs
     out pins, 8     ; Write data (this blocks)
-    set pindirs, 0  ; Deassert WAIT
+    set pins, 1     ; Deassert WAIT
+    set pindirs, 0  ; Release WAIT
+    set pins, 0     ; Reset WAIT
     wait 1 gpio 25  ; Wait for RDREQ to be deasserted
     mov pindirs, NULL ; Set data pins to inputs
 
@@ -90,6 +92,7 @@ void rv4028_program_init(PIO pio, uint write_sm, uint read_sm, uint write_offset
     sm_config_set_in_pins(&c, A0);
     sm_config_set_in_shift(&c, false, true, 16);
     sm_config_set_jmp_pin(&c, IOSEL);
+    sm_config_set_fifo_join(&c, PIO_FIFO_JOIN_RX);
 
     pio_sm_init(pio, write_sm, write_offset, &c);
     pio_sm_set_enabled(pio, write_sm, true);
@@ -99,7 +102,7 @@ void rv4028_program_init(PIO pio, uint write_sm, uint read_sm, uint write_offset
     sm_config_set_in_pins(&c, A0);
     sm_config_set_in_shift(&c, false, true, 8);
     sm_config_set_out_pins(&c, D0, 8);
-    sm_config_set_out_shift(&c, false, true, 8);
+    sm_config_set_out_shift(&c, true, true, 8);
     sm_config_set_jmp_pin(&c, IOSEL);
     sm_config_set_set_pins(&c, WAIT, 1);
 
