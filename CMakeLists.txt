@@ -18,10 +18,9 @@ set(CMAKE_CXX_STANDARD 17)
 # initialize the Raspberry Pi Pico SDK
 pico_sdk_init()
 
-add_compile_options(-Wall
+add_compile_options(-Wall -Werror
         -Wno-format
         -Wno-unused-function
-        -Wno-maybe-uninitialized
         )
 
 # Add your source files
@@ -42,7 +41,7 @@ pico_generate_pio_header(${NAME} ${CMAKE_CURRENT_LIST_DIR}/bus.pio)
 # create map/bin/hex file etc.
 pico_add_extra_outputs(${NAME})
 
-pico_enable_stdio_usb(${NAME} 0)
+pico_enable_stdio_usb(${NAME} 1)
 pico_enable_stdio_uart(${NAME} 1)
 
 # Set up files for the release packages
