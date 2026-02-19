@@ -132,7 +132,7 @@ int main() {
     uint slice_num = pwm_gpio_to_slice_num(CLK);
     pwm_set_wrap(slice_num, 1);
     pwm_set_chan_level(slice_num, PWM_CHAN_B, 1);
-    pwm_set_clkdiv(slice_num, 10);  // 10 MHz clock
+    pwm_set_clkdiv(slice_num, 8);  // 12.5 MHz clock
     pwm_set_enabled(slice_num, true);
 
     gpio_put(RST, 0);
