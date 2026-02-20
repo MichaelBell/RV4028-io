@@ -41,12 +41,13 @@ top:
 .side_set 1 pindirs
 top:
     wait 0 gpio 25     side 0  ; Wait for RDREQ to be asserted
-    jmp pin top        side 0  ; Ignore if IOSEL not asserted
+    jmp pin ignore     side 0  ; Ignore if IOSEL not asserted
     in pins, 8         side 1  ; Read address pins and auto push
     mov pindirs, ~NULL side 1  ; Set data pins to outputs and assert WAIT
     out pins, 8        side 1  ; Write data (this blocks)
     set pins, 1        side 1  ; Deassert WAIT
     set pins, 0        side 0  ; Release and reset WAIT
+ignore:
     wait 1 gpio 25     side 0  ; Wait for RDREQ to be deasserted
     mov pindirs, NULL  side 0  ; Set data pins to inputs
 

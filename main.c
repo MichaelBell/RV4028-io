@@ -5,10 +5,14 @@
 #include <hardware/clocks.h>
 
 #include "bus.pio.h"
+#include "ws2812.pio.h"
 
-#define BUSPIO pio0
+#define BUS_PIO pio0
 static uint write_sm;
 static uint read_sm;
+
+#define WS2812_PIO pio1
+static uint ws2812_sm;
 
 #define UART0_DATA   0x00
 #define UART0_FLAGS  0x02
@@ -19,6 +23,10 @@ static uint read_sm;
 #define WS2812_R     0x82
 #define WS2812_G     0x84
 #define WS2812_B     0x86
+#define MAX_PIXELS 250
+static uint8_t num_pixels = 1;
+static uint8_t cur_pixel  = 0;
+static uint8_t pixel_colours[MAX_PIXELS*3];
 
 #define FLASH_DATA   0x90
 #define FLASH_ADDR0  0x92
@@ -28,8 +36,39 @@ static uint read_sm;
 #define FLASH_BASE   0x10200000
 static uint8_t* flash_ptr = (uint8_t*)FLASH_BASE;
 
+static void handle_ws2812_ctrl(uint8_t data) {
+    switch (data)
+    {
+    case 254:
+        num_pixels = 1;
+        cur_pixel = 0;
+        break;
+
+    case 255:
+        for (int i = 0; i < num_pixels; ++i) {
+            uint32_t pixel_grb = 
+                (pixel_colours[i*3] << 8) | 
+                (pixel_colours[i*3+1] << 16) | 
+                (pixel_colours[i*3+2] << 24);
+            pio_sm_put_blocking(WS2812_PIO, ws2812_sm, pixel_grb);
+        }
+        break;
+
+    default:
+        if (data >= MAX_PIXELS) break;
+
+        if (data >= num_pixels) {
+            num_pixels = data + 1;
+        }
+        cur_pixel = data;
+        break;
+    }
+}
+
 static __force_inline void handle_write(uint32_t data_and_addr) {
     uintptr_t new_flash_ptr;
+
+    //printf("Write: %04x\n", data_and_addr);
 
     uint32_t addr = data_and_addr & 0xff;
     uint32_t data = data_and_addr >> 8;
@@ -42,6 +81,22 @@ static __force_inline void handle_write(uint32_t data_and_addr) {
     
     case UART1_DATA:
         uart1_hw->dr = data;
+        break;
+
+    case WS2812_CTRL:
+        handle_ws2812_ctrl(data);
+        break;
+
+    case WS2812_R:
+        pixel_colours[cur_pixel*3+1] = data;
+        break;
+
+    case WS2812_G:
+        pixel_colours[cur_pixel*3+2] = data;
+        break;
+
+    case WS2812_B:
+        pixel_colours[cur_pixel*3] = data;
         break;
 
     case FLASH_ADDR0:
@@ -70,6 +125,8 @@ static __force_inline void handle_write(uint32_t data_and_addr) {
 static __force_inline void handle_read(uint32_t addr) {
     uint32_t data = 0;
 
+    //if (addr >= 0x80 && addr < 0x88) printf("Read: %02x\n", addr);
+
     switch (addr)
     {
     case UART0_DATA:
@@ -88,6 +145,22 @@ static __force_inline void handle_read(uint32_t addr) {
         data = uart1_hw->fr;
         break;
     
+    case WS2812_CTRL:
+        data = cur_pixel;
+        break;
+
+    case WS2812_R:
+        data = pixel_colours[cur_pixel*3+1];
+        break;
+
+    case WS2812_G:
+        data = pixel_colours[cur_pixel*3+2];
+        break;
+
+    case WS2812_B:
+        data = pixel_colours[cur_pixel*3];
+        break;
+
     case FLASH_DATA:
         //printf("Flash read from %08x: %02x\n", (uintptr_t)flash_ptr, *flash_ptr);
         data = *flash_ptr++;
@@ -109,7 +182,7 @@ static __force_inline void handle_read(uint32_t addr) {
         break;
     }
 
-    pio_sm_put(BUSPIO, read_sm, data);
+    pio_sm_put(BUS_PIO, read_sm, data);
 }
 
 int main() {
@@ -117,8 +190,10 @@ int main() {
 
     stdio_init_all();
 
-    write_sm = pio_claim_unused_sm(BUSPIO, true);
-    read_sm = pio_claim_unused_sm(BUSPIO, true);
+    write_sm = pio_claim_unused_sm(BUS_PIO, true);
+    read_sm = pio_claim_unused_sm(BUS_PIO, true);
+    ws2812_sm = pio_claim_unused_sm(WS2812_PIO, true);
+    pio_set_gpio_base(WS2812_PIO, 16);
 
     // Setup clock
     uint CLK = 19;
@@ -138,10 +213,13 @@ int main() {
     gpio_put(RST, 0);
 
     {
-        uint write_offset = pio_add_program(BUSPIO, &rv4028_write_program);
-        uint read_offset = pio_add_program(BUSPIO, &rv4028_read_program);
+        uint write_offset = pio_add_program(BUS_PIO, &rv4028_write_program);
+        uint read_offset = pio_add_program(BUS_PIO, &rv4028_read_program);
 
         rv4028_program_init(pio0, write_sm, read_sm, write_offset, read_offset);
+
+        uint ws2812_offset = pio_add_program(WS2812_PIO, &ws2812_program);
+        ws2812_program_init(WS2812_PIO, ws2812_sm, ws2812_offset, 44, 800000, false);
     }
 
     printf("\n\n=== RV4028 IO Module:  Init complete.  Resetting RV4028. ===\n");
@@ -149,12 +227,12 @@ int main() {
     gpio_set_dir(RST, GPIO_IN);
 
     while (true) {
-        if (!pio_sm_is_rx_fifo_empty(BUSPIO, write_sm)) {
-            handle_write(pio_sm_get(BUSPIO, write_sm));
+        if (!pio_sm_is_rx_fifo_empty(BUS_PIO, write_sm)) {
+            handle_write(pio_sm_get(BUS_PIO, write_sm));
             continue;
         }
-        if (!pio_sm_is_rx_fifo_empty(BUSPIO, read_sm)) {
-            handle_read(pio_sm_get(BUSPIO, read_sm));
+        if (!pio_sm_is_rx_fifo_empty(BUS_PIO, read_sm)) {
+            handle_read(pio_sm_get(BUS_PIO, read_sm));
             continue;
         }
     }
