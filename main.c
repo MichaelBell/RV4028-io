@@ -3,6 +3,7 @@
 #include <hardware/uart.h>
 #include <hardware/pwm.h>
 #include <hardware/clocks.h>
+#include <hardware/vreg.h>
 
 #include "bus.pio.h"
 #include "ws2812.pio.h"
@@ -186,7 +187,9 @@ static __force_inline void handle_read(uint32_t addr) {
 }
 
 int main() {
-    set_sys_clock_khz(200000, true);
+    //vreg_set_voltage(VREG_VOLTAGE_1_20);
+    //sleep_ms(10);
+    set_sys_clock_khz(210000, true);
 
     stdio_init_all();
 
@@ -207,7 +210,7 @@ int main() {
     uint slice_num = pwm_gpio_to_slice_num(CLK);
     pwm_set_wrap(slice_num, 1);
     pwm_set_chan_level(slice_num, PWM_CHAN_B, 1);
-    pwm_set_clkdiv(slice_num, 8);  // 12.5 MHz clock
+    pwm_set_clkdiv(slice_num, 7);  // 15 MHz clock
     pwm_set_enabled(slice_num, true);
 
     gpio_put(RST, 0);
