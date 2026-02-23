@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include "pico/stdlib.h"
 #include <hardware/uart.h>
+#include <hardware/i2c.h>
 #include <hardware/pwm.h>
 #include <hardware/clocks.h>
 #include <hardware/vreg.h>
@@ -17,8 +18,22 @@ static uint ws2812_sm;
 
 #define UART0_DATA   0x00
 #define UART0_FLAGS  0x02
-#define UART1_DATA   0x08
-#define UART1_FLAGS  0x0A
+#define UART1_DATA   0x10
+#define UART1_FLAGS  0x12
+
+#define I2C0_ADDR    0x20
+#define I2C0_LEN     0x22
+#define I2C0_DATA    0x24
+#define I2C0_STATUS  0x26
+static uint8_t i2c0_txn_len;
+static uint8_t i2c0_status;
+
+#define I2C1_ADDR    0x30
+#define I2C1_LEN     0x32
+#define I2C1_DATA    0x34
+#define I2C1_STATUS  0x36
+static uint8_t i2c1_txn_len;
+static uint8_t i2c1_status;
 
 #define WS2812_CTRL  0x80
 #define WS2812_R     0x82
@@ -84,6 +99,64 @@ static __force_inline void handle_write(uint32_t data_and_addr) {
         uart1_hw->dr = data;
         break;
 
+    case I2C0_ADDR:
+        i2c0_hw->enable = 0;
+        i2c0_hw->tar = data;
+        break;
+
+    case I2C0_LEN:
+        i2c0_txn_len = data;
+        i2c0_status = 0;
+        if (i2c0_txn_len) {
+            i2c0_hw->enable = 1;
+        }
+        break;
+
+    case I2C0_DATA:
+        if (i2c0_txn_len) {
+            uint32_t data_cmd = data;
+            if (--i2c0_txn_len == 0) {
+                data_cmd |= I2C_IC_DATA_CMD_STOP_BITS;
+            }
+            i2c0_hw->data_cmd = data_cmd;
+            while (!(i2c0_hw->raw_intr_stat & I2C_IC_RAW_INTR_STAT_TX_EMPTY_BITS));
+            if (i2c0_hw->tx_abrt_source) {
+                (void)i2c0_hw->clr_tx_abrt;
+                i2c0_status = 1;
+                i2c0_txn_len = 0;
+            }
+        }
+        break;
+
+    case I2C1_ADDR:
+        i2c1_hw->enable = 0;
+        i2c1_hw->tar = data;
+        break;
+
+    case I2C1_LEN:
+        i2c1_txn_len = data;
+        i2c1_status = 0;
+        if (i2c1_txn_len) {
+            i2c1_hw->enable = 1;
+        }
+        break;
+
+    case I2C1_DATA:
+        if (i2c1_txn_len) {
+            uint32_t data_cmd = data;
+            if (--i2c1_txn_len == 0) {
+                data_cmd |= I2C_IC_DATA_CMD_STOP_BITS;
+            }
+            i2c1_hw->data_cmd = data_cmd;
+            while (!(i2c1_hw->raw_intr_stat & I2C_IC_RAW_INTR_STAT_TX_EMPTY_BITS));
+            if (i2c1_hw->tx_abrt_source) {
+                (void)i2c1_hw->clr_tx_abrt;
+                i2c1_status = 1;
+                i2c1_txn_len = 0;
+            }
+        }
+        break;
+
     case WS2812_CTRL:
         handle_ws2812_ctrl(data);
         break;
@@ -146,6 +219,66 @@ static __force_inline void handle_read(uint32_t addr) {
         data = uart1_hw->fr;
         break;
     
+    case I2C0_ADDR:
+        data = i2c0_hw->tar;
+        break;
+
+    case I2C0_LEN:
+        data = i2c0_txn_len;
+        break;
+
+    case I2C0_DATA:
+        if (i2c0_txn_len) {
+            uint32_t data_cmd = I2C_IC_DATA_CMD_CMD_BITS;
+            if (--i2c0_txn_len == 0) {
+                data_cmd |= I2C_IC_DATA_CMD_STOP_BITS;
+            }
+            i2c0_hw->data_cmd = data_cmd;
+            do {
+                if (i2c0_hw->raw_intr_stat & I2C_IC_RAW_INTR_STAT_TX_ABRT_BITS) {
+                    i2c0_status = 1;
+                    i2c0_txn_len = 0;
+                    (void)i2c0_hw->clr_tx_abrt;
+                }
+            } while (!i2c0_status && !i2c0_hw->rxflr);
+            data = i2c0_hw->data_cmd;
+        }
+        break;
+
+    case I2C0_STATUS:
+        data = i2c0_status;
+        break;
+    
+    case I2C1_ADDR:
+        data = i2c1_hw->tar;
+        break;
+
+    case I2C1_LEN:
+        data = i2c1_txn_len;
+        break;
+
+    case I2C1_DATA:
+        if (i2c1_txn_len) {
+            uint32_t data_cmd = I2C_IC_DATA_CMD_CMD_BITS;
+            if (--i2c1_txn_len == 0) {
+                data_cmd |= I2C_IC_DATA_CMD_STOP_BITS;
+            }
+            i2c1_hw->data_cmd = data_cmd;
+            do {
+                if (i2c1_hw->raw_intr_stat & I2C_IC_RAW_INTR_STAT_TX_ABRT_BITS) {
+                    i2c1_status = 1;
+                    i2c1_txn_len = 0;
+                    (void)i2c1_hw->clr_tx_abrt;
+                }
+            } while (!i2c1_status && !i2c1_hw->rxflr);
+            data = i2c1_hw->data_cmd;
+        }
+        break;
+
+    case I2C1_STATUS:
+        data = i2c1_status;
+        break;
+
     case WS2812_CTRL:
         data = cur_pixel;
         break;
@@ -192,6 +325,22 @@ int main() {
     set_sys_clock_khz(210000, true);
 
     stdio_init_all();
+    uart_init(uart1, 115200);
+    gpio_set_function(26, GPIO_FUNC_UART_AUX);
+    gpio_set_function(27, GPIO_FUNC_UART_AUX);
+
+    i2c_init(i2c0, 100 * 1000);
+    i2c_init(i2c1, 100 * 1000);
+
+    gpio_set_function(32, GPIO_FUNC_I2C);
+    gpio_set_function(33, GPIO_FUNC_I2C);
+    gpio_pull_up(32);
+    gpio_pull_up(33);
+    
+    gpio_set_function(42, GPIO_FUNC_I2C);
+    gpio_set_function(43, GPIO_FUNC_I2C);
+    gpio_pull_up(42);
+    gpio_pull_up(43);
 
     write_sm = pio_claim_unused_sm(BUS_PIO, true);
     read_sm = pio_claim_unused_sm(BUS_PIO, true);

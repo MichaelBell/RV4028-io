@@ -34,6 +34,7 @@ target_link_libraries(${NAME}
     hardware_pio
     hardware_pwm
     hardware_clocks
+    hardware_i2c
 )
 
 pico_generate_pio_header(${NAME} ${CMAKE_CURRENT_LIST_DIR}/bus.pio)
